@@ -28,6 +28,7 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
     val settings = store.settings
     val favorites = store.favorites
     val widgets = store.widgets
+    val customWidgets = store.customWidgets
     val locked = MutableStateFlow(false)
     val homeEvents = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
 
@@ -93,6 +94,18 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
 
     fun removeWidget(id: Int) = store.setWidgets(store.widgets.value - id)
 
+    fun saveCustomWidget(widget: CustomWidget) {
+        val list = store.customWidgets.value
+        store.setCustomWidgets(
+            if (list.any { it.id == widget.id }) list.map { if (it.id == widget.id) widget else it } else list + widget
+        )
+    }
+
+    fun deleteCustomWidget(widget: CustomWidget) {
+        store.setCustomWidgets(store.customWidgets.value.filterNot { it.id == widget.id })
+        if (widget.imagePath.isNotEmpty()) runCatching { java.io.File(widget.imagePath).delete() }
+    }
+
     fun lockNow() {
         locked.value = true
     }
@@ -106,6 +119,6 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
     }
 
     companion object {
-        const val MAX_FAVORITES = 7
+        const val MAX_FAVORITES = 8
     }
 }

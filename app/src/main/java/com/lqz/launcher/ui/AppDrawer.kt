@@ -172,8 +172,8 @@ fun AppDrawer(
                 value = query,
                 onValueChange = { query = it },
                 singleLine = true,
-                textStyle = TextStyle(color = Color.White, fontSize = 17.sp),
-                cursorBrush = SolidColor(Color.White),
+                textStyle = TextStyle(color = ThemeText, fontSize = 17.sp),
+                cursorBrush = SolidColor(ThemeText),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                 keyboardActions = KeyboardActions(onSearch = {
                     filtered.firstOrNull()?.let {
@@ -184,7 +184,7 @@ fun AppDrawer(
                 decorationBox = { inner ->
                     Box(contentAlignment = Alignment.CenterStart) {
                         if (query.isEmpty()) {
-                            Text("Cari aplikasi", color = Color.White.copy(alpha = 0.55f), fontSize = 17.sp)
+                            Text("Cari aplikasi", color = ThemeText.copy(alpha = 0.55f), fontSize = 17.sp)
                         }
                         inner()
                     }
@@ -192,7 +192,7 @@ fun AppDrawer(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 20.dp, vertical = 8.dp)
-                    .liquidGlass(RoundedCornerShape(50), strength = 0.9f, elevation = 6.dp)
+                    .panel(RoundedCornerShape(50), strength = 0.9f, elevation = 6.dp)
                     .padding(horizontal = 20.dp, vertical = 14.dp)
             )
             LazyColumn(
@@ -257,12 +257,12 @@ fun AppDrawer(
             Box(
                 Modifier
                     .size(96.dp)
-                    .liquidGlass(CircleShape, strength = 2f, elevation = 16.dp),
+                    .panel(CircleShape, strength = 2f, elevation = 16.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
                     lastBubble.toString(),
-                    color = Color.White,
+                    color = ThemeText,
                     fontSize = 46.sp,
                     fontWeight = FontWeight.Bold
                 )
@@ -277,10 +277,10 @@ private fun LetterHeader(letter: Char, modifier: Modifier = Modifier) {
         modifier
             .padding(top = 14.dp, bottom = 4.dp, start = 4.dp)
             .size(36.dp)
-            .liquidGlass(CircleShape, strength = 1f, elevation = 6.dp),
+            .panel(CircleShape, strength = 1f, elevation = 6.dp),
         contentAlignment = Alignment.Center
     ) {
-        Text(letter.toString(), color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        Text(letter.toString(), color = ThemeText, fontSize = 16.sp, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -297,7 +297,7 @@ private fun AppRow(app: AppEntry, modifier: Modifier, onLaunch: () -> Unit, onMe
         Spacer(Modifier.width(16.dp))
         Text(
             app.label,
-            color = Color.White,
+            color = ThemeText,
             fontSize = 18.sp,
             fontWeight = FontWeight.Medium,
             maxLines = 1,
@@ -372,7 +372,7 @@ private fun AlphabetRail(
                     ch.toString(),
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
-                    color = if (ch in available) Color.White else Color.White.copy(alpha = 0.28f)
+                    color = if (ch in available) ThemeText else ThemeText.copy(alpha = 0.28f)
                 )
             }
         }

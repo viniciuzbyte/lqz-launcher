@@ -10,14 +10,12 @@ import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
-import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -25,19 +23,15 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.graphics.Shadow
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.lqz.launcher.data.AppEntry
@@ -54,6 +48,17 @@ fun HomePage(
     onAppMenu: (AppEntry) -> Unit
 ) {
     val context = LocalContext.current
+    val palette = LocalPalette.current
+    val horizontal = when (settings.homeAlign) {
+        1 -> Alignment.End
+        2 -> Alignment.CenterHorizontally
+        else -> Alignment.Start
+    }
+    val clockColor = if (settings.homeClockColor == 0) {
+        palette.text
+    } else {
+        ClockColorChoices[settings.homeClockColor.coerceIn(1, ClockColorChoices.lastIndex)]
+    }
     val hint = rememberInfiniteTransition(label = "hint")
     val bob by hint.animateFloat(
         initialValue = 0f,
@@ -72,50 +77,93 @@ fun HomePage(
             )
             .pointerInput(Unit) { detectTapGestures(onLongPress = { onLongPress() }) }
             .windowInsetsPadding(WindowInsets.safeDrawing)
-            .padding(horizontal = 26.dp, vertical = 20.dp)
+            .padding(horizontal = 28.dp, vertical = 20.dp),
+        horizontalAlignment = horizontal
     ) {
-        Spacer(Modifier.height(24.dp))
+        if (settings.homeLayout == 2) Spacer(Modifier.weight(1f)) else Spacer(Modifier.height(24.dp))
+
         ClockView(
             style = settings.homeClockStyle,
             scale = settings.homeClockScale,
             use24h = settings.use24h,
             showSeconds = settings.showSeconds,
-            color = Color.White,
+            color = clockColor,
+            accent = palette.accent,
             showDate = true,
-            horizontal = Alignment.Start
+            horizontal = horizontal,
+            font = settings.clockFont
         )
+
         Spacer(Modifier.weight(1f))
 
-        if (favorites.isEmpty()) {
-            Text(
-                "Tekan lama aplikasi di daftar untuk menambahkan ke favorit",
-                color = Color.White.copy(alpha = 0.7f),
-                fontSize = 15.sp,
-                style = TextStyle(shadow = Shadow(Color.Black.copy(alpha = 0.3f), Offset(0f, 2f), 8f))
-            )
-        }
-
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            favorites.forEachIndexed { index, app ->
-                Row(
-                    Modifier
-                        .staggerIn(index)
-                        .bounceClick(onLongClick = { onAppMenu(app) }) { launchApp(context, app) }
-                        .liquidGlass(RoundedCornerShape(28.dp))
-                        .defaultMinSize(minWidth = 220.dp)
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    AppIcon(app, scale = 0.82f)
-                    Spacer(Modifier.width(14.dp))
+        when (settings.homeLayout) {
+            1 -> favorites.chunked(4).forEachIndexed { rowIndex, rowApps ->
+                Row(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+                    rowApps.forEachIndexed { i, app ->
+                        Column(
+                            Modifier
+                                .weight(1f)
+                                .staggerIn(rowIndex * 4 + i)
+                                .bounceClick(onLongClick = { onAppMenu(app) }) { launchApp(context, app) },
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            AppIcon(app)
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                app.label,
+                                color = ThemeText,
+                                fontSize = 11.sp,
+                                maxLines = 1
+                            )
+                        }
+                    }
+                    repeat(4 - rowApps.size) { Spacer(Modifier.weight(1f)) }
+                }
+            }
+            2 -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                favorites.take(4).forEachIndexed { index, app ->
+                    Box(
+                        Modifier
+                            .staggerIn(index)
+                            .bounceClick(onLongClick = { onAppMenu(app) }) { launchApp(context, app) }
+                    ) {
+                        AppIcon(app)
+                    }
+                }
+            }
+            else -> {
+                if (favorites.isEmpty()) {
                     Text(
-                        app.label,
-                        color = Color.White,
-                        fontSize = 19.sp,
-                        fontWeight = FontWeight.Medium,
-                        maxLines = 1
+                        "Tekan lama aplikasi di daftar untuk menambahkan ke favorit",
+                        color = ThemeTextSoft,
+                        fontSize = 15.sp
                     )
-                    Spacer(Modifier.width(10.dp))
+                }
+                favorites.forEachIndexed { index, app ->
+                    val iconFirst = settings.homeAlign != 1
+                    Row(
+                        Modifier
+                            .staggerIn(index)
+                            .bounceClick(onLongClick = { onAppMenu(app) }) { launchApp(context, app) }
+                            .padding(vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (settings.showFavoriteIcons && iconFirst) {
+                            AppIcon(app, scale = 0.62f)
+                            Spacer(Modifier.width(16.dp))
+                        }
+                        Text(
+                            app.label,
+                            color = ThemeText,
+                            fontSize = 28.sp,
+                            fontWeight = FontWeight.Light,
+                            maxLines = 1
+                        )
+                        if (settings.showFavoriteIcons && !iconFirst) {
+                            Spacer(Modifier.width(16.dp))
+                            AppIcon(app, scale = 0.62f)
+                        }
+                    }
                 }
             }
         }
@@ -124,7 +172,7 @@ fun HomePage(
         Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
             Text(
                 "⌃",
-                color = Color.White.copy(alpha = 0.75f),
+                color = palette.accent,
                 fontSize = 26.sp,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.graphicsLayer { translationY = bob }

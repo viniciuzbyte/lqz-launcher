@@ -11,6 +11,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
@@ -23,6 +24,7 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -44,25 +46,56 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lqz.launcher.data.AppEntry
+import com.lqz.launcher.data.CustomWidget
 import com.lqz.launcher.data.LauncherViewModel
 import com.lqz.launcher.data.openAppInfo
 import com.lqz.launcher.data.openWallpaperPicker
 import com.lqz.launcher.data.uninstallApp
+import com.lqz.launcher.notif.NotificationStore
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 
+class HostActions(
+    val pickImage: ((String?) -> Unit) -> Unit,
+    val dim: (Float?) -> Unit,
+    val openNotificationAccess: () -> Unit,
+    val systemBars: (Boolean) -> Unit,
+    val blur: (Int) -> Unit
+)
+
 @Composable
-fun LauncherRoot(vm: LauncherViewModel, env: WidgetEnv, onBlur: (Int) -> Unit) {
+fun LauncherRoot(vm: LauncherViewModel, env: WidgetEnv, host: HostActions) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     val apps by vm.apps.collectAsStateWithLifecycle()
     val favorites by vm.favorites.collectAsStateWithLifecycle()
     val widgets by vm.widgets.collectAsStateWithLifecycle()
+    val customWidgets by vm.customWidgets.collectAsStateWithLifecycle()
     val locked by vm.locked.collectAsStateWithLifecycle()
+    val notifications by NotificationStore.items.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+
+    val systemDark = isSystemInDarkTheme()
+    val dark = when (settings.themeMode) {
+        1 -> false
+        2 -> true
+        else -> systemDark
+    }
+    val accent = AccentColors[settings.accent.coerceIn(0, AccentColors.lastIndex)]
+    val palette = remember(dark, accent) { makePalette(dark, accent) }
+    val lockPalette = remember(accent) { makePalette(true, accent) }
+
+    var notifAccess by remember { mutableStateOf(NotificationStore.isEnabled(context)) }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        notifAccess = NotificationStore.isEnabled(context)
+    }
+    LaunchedEffect(dark) { host.systemBars(dark) }
+
     val pager = rememberPagerState(initialPage = 1) { 2 }
     val drawer = remember { Animatable(0f) }
     var showSettings by remember { mutableStateOf(false) }
@@ -70,9 +103,11 @@ fun LauncherRoot(vm: LauncherViewModel, env: WidgetEnv, onBlur: (Int) -> Unit) {
     var showMenu by remember { mutableStateOf(false) }
     var menuVisible by remember { mutableStateOf(false) }
     var menuApp by remember { mutableStateOf<AppEntry?>(null) }
+    var editing by remember { mutableStateOf<CustomWidget?>(null) }
+    var editingIsNew by remember { mutableStateOf(false) }
     val drawerOpen by remember { derivedStateOf { drawer.value > 0.02f } }
     val overlayBlur by animateFloatAsState(
-        targetValue = if (showSettings || showPicker) 1f else 0f,
+        targetValue = if (showSettings || showPicker || editing != null) 1f else 0f,
         animationSpec = tween(320),
         label = "overlayBlur"
     )
@@ -81,15 +116,15 @@ fun LauncherRoot(vm: LauncherViewModel, env: WidgetEnv, onBlur: (Int) -> Unit) {
         favorites.orEmpty().mapNotNull { byKey[it] }
     }
 
-    MaterialTheme(colorScheme = darkColorScheme()) {
-        CompositionLocalProvider(LocalSettings provides settings) {
+    CompositionLocalProvider(LocalSettings provides settings, LocalPalette provides palette) {
+        MaterialTheme(colorScheme = if (dark) darkColorScheme() else lightColorScheme()) {
             BoxWithConstraints(Modifier.fillMaxSize()) {
                 val heightPx = with(LocalDensity.current) { maxHeight.toPx() }
 
                 LaunchedEffect(settings.blurRadius) {
                     snapshotFlow {
                         (maxOf(drawer.value, overlayBlur) * settings.blurRadius).toInt() / 4 * 4
-                    }.distinctUntilChanged().collect { onBlur(it) }
+                    }.distinctUntilChanged().collect { host.blur(it) }
                 }
 
                 LaunchedEffect(Unit) {
@@ -98,6 +133,7 @@ fun LauncherRoot(vm: LauncherViewModel, env: WidgetEnv, onBlur: (Int) -> Unit) {
                         showPicker = false
                         showMenu = false
                         menuVisible = false
+                        editing = null
                         launch { drawer.animateTo(0f, spring(dampingRatio = 0.86f, stiffness = 260f)) }
                         launch { pager.animateScrollToPage(1) }
                     }
@@ -118,9 +154,11 @@ fun LauncherRoot(vm: LauncherViewModel, env: WidgetEnv, onBlur: (Int) -> Unit) {
                 }
 
                 BackHandler(
-                    enabled = showSettings || showPicker || showMenu || menuVisible || drawerOpen || pager.currentPage != 1
+                    enabled = editing != null || showSettings || showPicker || showMenu || menuVisible ||
+                        drawerOpen || pager.currentPage != 1
                 ) {
                     when {
+                        editing != null -> editing = null
                         showSettings -> showSettings = false
                         showPicker -> showPicker = false
                         showMenu -> showMenu = false
@@ -135,7 +173,11 @@ fun LauncherRoot(vm: LauncherViewModel, env: WidgetEnv, onBlur: (Int) -> Unit) {
                         .fillMaxSize()
                         .background(
                             Brush.verticalGradient(
-                                listOf(Color.Black.copy(alpha = 0.30f), Color.Transparent, Color.Black.copy(alpha = 0.40f))
+                                listOf(
+                                    palette.scrim,
+                                    palette.scrim.copy(alpha = palette.scrim.alpha * 0.55f),
+                                    palette.scrim.copy(alpha = (palette.scrim.alpha * 1.2f).coerceAtMost(1f))
+                                )
                             )
                         )
                 )
@@ -156,7 +198,21 @@ fun LauncherRoot(vm: LauncherViewModel, env: WidgetEnv, onBlur: (Int) -> Unit) {
                         modifier = Modifier.fillMaxSize()
                     ) { page ->
                         if (page == 0) {
-                            WidgetsPage(widgets, env, onAdd = { showPicker = true })
+                            WidgetsPage(
+                                systemWidgets = widgets,
+                                customWidgets = customWidgets,
+                                env = env,
+                                onAddSystem = { showPicker = true },
+                                onNewCustom = {
+                                    editingIsNew = true
+                                    editing = newCustomWidget()
+                                },
+                                onEditCustom = {
+                                    editingIsNew = false
+                                    editing = it
+                                },
+                                onDeleteCustom = { vm.deleteCustomWidget(it) }
+                            )
                         } else {
                             HomePage(
                                 settings = settings,
@@ -176,7 +232,9 @@ fun LauncherRoot(vm: LauncherViewModel, env: WidgetEnv, onBlur: (Int) -> Unit) {
                 Box(
                     Modifier
                         .fillMaxSize()
-                        .drawBehind { drawRect(Color.Black.copy(alpha = 0.4f * drawer.value)) }
+                        .drawBehind {
+                            drawRect(palette.overlay.copy(alpha = palette.overlay.alpha * 0.7f * drawer.value))
+                        }
                 )
 
                 Box(
@@ -221,14 +279,36 @@ fun LauncherRoot(vm: LauncherViewModel, env: WidgetEnv, onBlur: (Int) -> Unit) {
                 ) {
                     SettingsScreen(
                         settings = settings,
+                        notifAccess = notifAccess,
                         onChange = { block -> vm.updateSettings(block) },
                         onClose = { showSettings = false },
                         onWallpaper = { openWallpaperPicker(context) },
                         onLockNow = {
                             showSettings = false
                             vm.lockNow()
-                        }
+                        },
+                        onNotifAccess = host.openNotificationAccess
                     )
+                }
+
+                AnimatedVisibility(
+                    visible = editing != null,
+                    enter = fadeIn(tween(250)) + slideInVertically(tween(300)) { it / 8 },
+                    exit = fadeOut(tween(200)) + slideOutVertically(tween(250)) { it / 8 }
+                ) {
+                    val target = editing
+                    if (target != null) {
+                        WidgetEditor(
+                            initial = target,
+                            isNew = editingIsNew,
+                            onSave = {
+                                vm.saveCustomWidget(it)
+                                editing = null
+                            },
+                            onCancel = { editing = null },
+                            onPickImage = host.pickImage
+                        )
+                    }
                 }
 
                 GlassPopup(visible = showMenu, onDismiss = { showMenu = false }) {
@@ -236,7 +316,13 @@ fun LauncherRoot(vm: LauncherViewModel, env: WidgetEnv, onBlur: (Int) -> Unit) {
                         showMenu = false
                         showSettings = true
                     }
-                    PopupAction("Tambah widget") {
+                    PopupAction("Buat widget") {
+                        showMenu = false
+                        editingIsNew = true
+                        editing = newCustomWidget()
+                        scope.launch { pager.animateScrollToPage(0) }
+                    }
+                    PopupAction("Widget sistem") {
                         showMenu = false
                         showPicker = true
                         scope.launch { pager.animateScrollToPage(0) }
@@ -261,7 +347,13 @@ fun LauncherRoot(vm: LauncherViewModel, env: WidgetEnv, onBlur: (Int) -> Unit) {
                         ) {
                             AppIcon(app, scale = 0.9f)
                             Spacer(Modifier.width(14.dp))
-                            Text(app.label, color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                            Text(
+                                app.label,
+                                color = ThemeText,
+                                fontSize = 19.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1
+                            )
                         }
                         PopupAction(if (isFavorite) "Hapus dari favorit" else "Tambah ke favorit") {
                             vm.toggleFavorite(app)
@@ -283,7 +375,16 @@ fun LauncherRoot(vm: LauncherViewModel, env: WidgetEnv, onBlur: (Int) -> Unit) {
                     enter = fadeIn(tween(300)),
                     exit = fadeOut(tween(150))
                 ) {
-                    LockScreen(settings = settings, onUnlock = { vm.unlock() })
+                    CompositionLocalProvider(LocalPalette provides lockPalette) {
+                        LockScreen(
+                            settings = settings,
+                            notifications = if (settings.lockShowNotifications) notifications else emptyList(),
+                            notifAccess = notifAccess,
+                            onUnlock = { vm.unlock() },
+                            onRequestAccess = host.openNotificationAccess,
+                            onDim = host.dim
+                        )
+                    }
                 }
             }
         }

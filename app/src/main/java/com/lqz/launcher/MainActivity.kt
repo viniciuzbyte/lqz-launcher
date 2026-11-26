@@ -9,6 +9,8 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
@@ -16,9 +18,18 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.lifecycleScope
+import com.lqz.launcher.data.ImageStore
 import com.lqz.launcher.data.LauncherViewModel
+import com.lqz.launcher.ui.HostActions
 import com.lqz.launcher.ui.LauncherRoot
 import com.lqz.launcher.ui.WidgetEnv
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
 
@@ -27,6 +38,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var widgetManager: AppWidgetManager
     private var pendingWidgetId = -1
     private var resumed = false
+    private var imageCallback: ((String?) -> Unit)? = null
 
     private val screenOffReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -39,6 +51,21 @@ class MainActivity : ComponentActivity() {
             afterBind(pendingWidgetId)
         } else {
             discardPendingWidget()
+        }
+    }
+
+    private val imagePicker = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        val callback = imageCallback
+        imageCallback = null
+        if (callback != null) {
+            if (uri == null) {
+                callback(null)
+            } else {
+                lifecycleScope.launch {
+                    val path = withContext(Dispatchers.IO) { ImageStore.import(applicationContext, uri) }
+                    callback(path)
+                }
+            }
         }
     }
 
@@ -57,8 +84,15 @@ class MainActivity : ComponentActivity() {
             ContextCompat.RECEIVER_EXPORTED
         )
         val env = WidgetEnv(widgetHost, widgetManager, ::requestWidget, ::removeWidget)
+        val host = HostActions(
+            pickImage = ::pickImage,
+            dim = ::applyDim,
+            openNotificationAccess = ::openNotificationAccess,
+            systemBars = ::applySystemBars,
+            blur = ::applyBlur
+        )
         setContent {
-            LauncherRoot(vm = vm, env = env, onBlur = ::applyBlur)
+            LauncherRoot(vm = vm, env = env, host = host)
         }
     }
 
@@ -104,6 +138,36 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             window.setBackgroundBlurRadius(radius)
         }
+    }
+
+    private fun applyDim(level: Float?) {
+        val attrs = window.attributes
+        attrs.screenBrightness = level ?: WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+        window.attributes = attrs
+        val controller = WindowCompat.getInsetsController(window, window.decorView)
+        if (level != null) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            controller.hide(WindowInsetsCompat.Type.systemBars())
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            controller.show(WindowInsetsCompat.Type.systemBars())
+        }
+    }
+
+    private fun applySystemBars(darkTheme: Boolean) {
+        val controller = WindowCompat.getInsetsController(window, window.decorView)
+        controller.isAppearanceLightStatusBars = !darkTheme
+        controller.isAppearanceLightNavigationBars = !darkTheme
+    }
+
+    private fun openNotificationAccess() {
+        runCatching { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
+    }
+
+    private fun pickImage(callback: (String?) -> Unit) {
+        imageCallback = callback
+        imagePicker.launch("image/*")
     }
 
     private fun requestWidget(info: AppWidgetProviderInfo) {
